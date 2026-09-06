@@ -1,0 +1,55 @@
+services:
+  janus:
+    image: ghcr.io/snowmoonss/janus:latest
+    container_name: janus
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - PORT=3000
+      # ---- 数据库（MySQL/MariaDB，必须与 Blessing Skin 共享同一库）----
+      - DB_CONNECTION=mysql
+      - DB_HOST=mariadb                        # 容器网络内的 MariaDB 服务名
+      - DB_PORT=3306
+      - DB_USERNAME=blessingskin
+      - DB_PASSWORD=change-me-db-password
+      - DB_NAME=blessingskin
+      # ---- OpenID 提供者标识符 & 皮肤站地址（必须 HTTPS、不得以 / 结尾）----
+      - ISSUER=https://auth.example.com        # ← 改成你的 Janus 对外地址
+      - BS_SITE_URL=https://skin.example.com   # ← 改成你的皮肤站地址
+      - SHARED_CLIENT_ID=
+      # - DB_PREFIX=bs_                        # 若 Blessing Skin 配置了表前缀则打开
+      # ---- 令牌有效期（秒）----
+      - TOKEN_EXPIRES_IN_1=259200
+      - TOKEN_EXPIRES_IN_2=604800
+      - DEVICE_CODE_EXPIRES_IN=600
+      - GRANT_EXPIRES_IN=25920000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/config       # .env 及 oauth-private.key
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 建议：Janus 与 Blessing Skin 应共享同一个数据库。
+  # 如果你已有 Blessing Skin 的 MariaDB，可把 janus 的 DB_HOST 指向它，
+  # 并删除此 mariadb 服务。
+  mariadb:
+    image: mariadb:11
+    container_name: janus-mariadb
+    environment:
+      - MARIADB_ROOT_PASSWORD=change-me-root-password
+      - MARIADB_DATABASE=blessingskin
+      - MARIADB_USER=blessingskin
+      - MARIADB_PASSWORD=change-me-db-password
+    volumes:
+      - ./mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p$$MARIADB_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
