@@ -72,7 +72,8 @@ RUN set -eux; \
       ca-certificates \
       openssl \
       gnupg \
-      netcat-openbsd; \
+      netcat-openbsd \
+      mariadb-client; \
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs; \
     node --version; \

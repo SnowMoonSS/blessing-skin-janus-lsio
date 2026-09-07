@@ -18,48 +18,82 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Generate .env if not present (do not overwrite the persisted config).
+# .env — copy the shipped template, then apply container (docker-compose)
+# environment overrides. Precedence (highest first):
+#   docker-compose env vars > existing .env > copied .env.example default.
 # ---------------------------------------------------------------------------
-echo "**** Generating .env if not present ****"
+echo "**** Preparing /config/.env from .env.example ****"
 if [[ ! -f /config/.env ]]; then
-    if [[ -n "${JANUS_ENV:-}" ]]; then
-        printf '%s' "${JANUS_ENV}" > /config/.env
-    else
-        cat > /config/.env <<EOF
-PORT=${PORT:-3000}
-DB_HOST=${DB_HOST:-}
-DB_PORT=${DB_PORT:-3306}
-DB_USERNAME=${DB_USERNAME:-}
-DB_PASSWORD=${DB_PASSWORD:-}
-DB_NAME=${DB_NAME:-}
-ISSUER=${ISSUER:-}
-BS_SITE_URL=${BS_SITE_URL:-}
-SHARED_CLIENT_ID=${SHARED_CLIENT_ID:-}
-TOKEN_EXPIRES_IN_1=${TOKEN_EXPIRES_IN_1:-259200}
-TOKEN_EXPIRES_IN_2=${TOKEN_EXPIRES_IN_2:-604800}
-DEVICE_CODE_EXPIRES_IN=${DEVICE_CODE_EXPIRES_IN:-600}
-GRANT_EXPIRES_IN=${GRANT_EXPIRES_IN:-25920000}
-DB_CONNECTION_STRING="mysql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-EOF
-    fi
+    cp /app/.env.example /config/.env
 fi
+
+apply_env() {
+    local key="$1"
+    local val="${!key}"
+    if [[ -n "${val}" ]]; then
+        local esc
+        esc=$(printf '%s' "${val}" | sed -e 's/[\\&|]/\\&/g')
+        if grep -q "^${key}=" /config/.env; then
+            sed -ri "s|^${key}=.*|${key}=${esc}|" /config/.env
+        else
+            echo "${key}=${val}" >> /config/.env
+        fi
+    fi
+}
+
+apply_env PORT
+apply_env DB_HOST
+apply_env DB_PORT
+apply_env DB_USERNAME
+apply_env DB_PASSWORD
+apply_env DB_NAME
+apply_env DB_PREFIX
+apply_env ISSUER
+apply_env BS_SITE_URL
+apply_env SHARED_CLIENT_ID
+apply_env TOKEN_EXPIRES_IN_1
+apply_env TOKEN_EXPIRES_IN_2
+apply_env DEVICE_CODE_EXPIRES_IN
+apply_env GRANT_EXPIRES_IN
 
 echo "**** Linking .env into the application directory ****"
 ln -sfnT /config/.env /app/.env
 
 # ---------------------------------------------------------------------------
-# oauth-private.key — copied from Blessing Skin Server's storage/ directory.
-# Convert PKCS#1 -> PKCS#8 if necessary. If absent, Janus itself will fail.
+# oauth-private.key — read from the (read-only) Blessing Skin storage mount.
+# Convert PKCS#1 -> PKCS#8 if necessary.
 # ---------------------------------------------------------------------------
-echo "**** Handling oauth-private.key ****"
-if [[ -f /config/oauth-private.key ]]; then
-    if grep -q "BEGIN RSA PRIVATE KEY" /config/oauth-private.key; then
+echo "**** Copying oauth-private.key from Blessing Skin storage ****"
+if [[ -f /server-storage/oauth-private.key ]]; then
+    if grep -q "BEGIN RSA PRIVATE KEY" /server-storage/oauth-private.key; then
         echo "Converting PKCS#1 key to PKCS#8"
-        openssl pkcs8 -topk8 -nocrypt -in /config/oauth-private.key -out /app/oauth-private.key
+        openssl pkcs8 -topk8 -nocrypt -in /server-storage/oauth-private.key -out /app/oauth-private.key
     else
-        cp -a /config/oauth-private.key /app/oauth-private.key
+        cp -a /server-storage/oauth-private.key /app/oauth-private.key
     fi
     chmod 600 /app/oauth-private.key
+fi
+
+# ---------------------------------------------------------------------------
+# Backup the database BEFORE running any migration.
+# ---------------------------------------------------------------------------
+echo "**** Backing up database before migration ****"
+mkdir -p /data
+set -a
+. /config/.env
+set +a
+BACKUP_FILE="/data/backup-$(date +%Y%m%d%H%M%S).sql"
+if [[ -n "${DB_HOST:-}" && -n "${DB_NAME:-}" ]]; then
+    MYSQL_PWD="${DB_PASSWORD}" mariadb-dump \
+        -h"${DB_HOST}" -P"${DB_PORT:-3306}" -u"${DB_USERNAME}" "${DB_NAME}" \
+        > "${BACKUP_FILE}" 2>/dev/null
+    if [[ -s "${BACKUP_FILE}" ]]; then
+        echo "   Backup saved to ${BACKUP_FILE}"
+    else
+        echo "   WARN: backup may have failed (${BACKUP_FILE})"
+    fi
+else
+    echo "   DB_* not configured; skipping backup (check /config/.env)."
 fi
 
 # ---------------------------------------------------------------------------
