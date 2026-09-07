@@ -52,6 +52,7 @@ RUN cp prisma/schema.prisma.example prisma/schema.prisma && \
     npx prisma generate && \
     echo "Building NestJS app" && \
     npm run build && \
+    rm -f prisma/schema.prisma && \
     echo "Build ready"
 
 ###############################################################################

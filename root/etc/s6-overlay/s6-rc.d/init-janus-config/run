@@ -17,19 +17,14 @@ else
     RUN_GROUP="www-data"
 fi
 
-echo "**** Ensuring /config and /data exist ****"
-mkdir -p /config /data
-
 # ---------------------------------------------------------------------------
-# Generate .env if not present (idempotent).
+# Generate .env if not present (do not overwrite the persisted config).
 # ---------------------------------------------------------------------------
 echo "**** Generating .env if not present ****"
 if [[ ! -f /config/.env ]]; then
     if [[ -n "${JANUS_ENV:-}" ]]; then
-        echo "Writing user-provided .env from JANUS_ENV"
         printf '%s' "${JANUS_ENV}" > /config/.env
     else
-        echo "Generating .env from container environment"
         cat > /config/.env <<EOF
 PORT=${PORT:-3000}
 DB_HOST=${DB_HOST:-}
@@ -53,56 +48,17 @@ echo "**** Linking .env into the application directory ****"
 ln -sfnT /config/.env /app/.env
 
 # ---------------------------------------------------------------------------
-# Minimal validation so users get a clear error instead of a NestJS crash.
-# ---------------------------------------------------------------------------
-echo "**** Validating configuration ****"
-# shellcheck disable=SC1091
-. /config/.env
-
-if [[ -z "${DB_HOST:-}" || -z "${DB_USERNAME:-}" || -z "${DB_PASSWORD:-}" || -z "${DB_NAME:-}" ]]; then
-    echo "ERROR: JANUS requires DB_HOST, DB_USERNAME, DB_PASSWORD and DB_NAME." >&2
-    echo "       Set them via environment variables (see README)." >&2
-    exit 1
-fi
-
-# ISSUER / BS_SITE_URL must be https:// (or http://localhost), with no trailing
-# slash, query string or fragment — matching Janus's env validation.
-validate_secure_url() {
-    local var_name="$1"
-    local val="${!var_name}"
-    if [[ -z "${val}" ]]; then
-        echo "ERROR: ${var_name} is required." >&2
-        exit 1
-    fi
-    if [[ "${val}" != "https://"* && "${val}" != "http://localhost"* && "${val}" != "http://127.0.0.1"* ]]; then
-        echo "ERROR: ${var_name} must be an https:// URL (or http://localhost)." >&2
-        exit 1
-    fi
-    if [[ "${val}" == *"/" ]]; then
-        echo "ERROR: ${var_name} must not end with a slash." >&2
-        exit 1
-    fi
-}
-validate_secure_url ISSUER
-validate_secure_url BS_SITE_URL
-
-# ---------------------------------------------------------------------------
 # oauth-private.key — copied from Blessing Skin Server's storage/ directory.
-# Convert PKCS#1 -> PKCS#8 if necessary.
+# Convert PKCS#1 -> PKCS#8 if necessary. If absent, Janus itself will fail.
 # ---------------------------------------------------------------------------
 echo "**** Handling oauth-private.key ****"
-if [[ ! -f /config/oauth-private.key ]]; then
-    echo "ERROR: /config/oauth-private.key not found." >&2
-    echo "       Copy the file from your Blessing Skin Server's storage/oauth-private.key" >&2
-    echo "       into the ./config volume (e.g. ./config/oauth-private.key) before starting." >&2
-    exit 1
-fi
-if grep -q "BEGIN RSA PRIVATE KEY" /config/oauth-private.key; then
-    echo "Converting PKCS#1 key to PKCS#8"
-    openssl pkcs8 -topk8 -nocrypt -in /config/oauth-private.key -out /app/oauth-private.key
-    chmod 600 /app/oauth-private.key
-else
-    cp -a /config/oauth-private.key /app/oauth-private.key
+if [[ -f /config/oauth-private.key ]]; then
+    if grep -q "BEGIN RSA PRIVATE KEY" /config/oauth-private.key; then
+        echo "Converting PKCS#1 key to PKCS#8"
+        openssl pkcs8 -topk8 -nocrypt -in /config/oauth-private.key -out /app/oauth-private.key
+    else
+        cp -a /config/oauth-private.key /app/oauth-private.key
+    fi
     chmod 600 /app/oauth-private.key
 fi
 
@@ -110,15 +66,10 @@ fi
 # Prisma schema preparation (DB_PREFIX support).
 # ---------------------------------------------------------------------------
 echo "**** Preparing Prisma schema ****"
-if [[ ! -f /app/prisma/schema.prisma ]]; then
-    cp /app/prisma/schema.prisma.example /app/prisma/schema.prisma
-fi
+cp /app/prisma/schema.prisma.example /app/prisma/schema.prisma
 if [[ -n "${DB_PREFIX:-}" ]]; then
     echo "Applying table prefix '${DB_PREFIX}' to Prisma schema and migrations"
-    # Prefix every @@map(...) table mapping. /app is rebuilt fresh from the
-    # image on each start, so this is idempotent across restarts.
     sed -ri "s/@@map\(\"([^\"]+)\"\)/@@map(\"${DB_PREFIX}\1\")/g" /app/prisma/schema.prisma
-    # Align the yggc_* table names in the migration SQL with the prefix.
     for f in /app/prisma/migrations/*/migration.sql; do
         sed -ri "s/\`yggc_/\`${DB_PREFIX}yggc_/g" "$f"
     done
@@ -129,19 +80,15 @@ fi
 
 echo "**** Running database migrations ****"
 cd /app
-# The 0_init migration mirrors the already-existing Blessing Skin tables and
-# must NOT be executed; mark it as applied, then deploy the Janus migrations.
+# 0_init mirrors the already-existing Blessing Skin tables; mark it applied,
+# then deploy the Janus migrations.
 prisma migrate resolve --applied 0_init || true
-if ! prisma migrate deploy; then
-    echo "ERROR: Database migration failed. Check that DB_* points to a reachable" >&2
-    echo "       MySQL/MariaDB (the same one used by Blessing Skin Server)." >&2
-    exit 1
-fi
+prisma migrate deploy
 
 echo "**** Setting permissions ****"
-# /config and /data are writable by the run user. The rest of /app is read-only
-# for the app, so only the signing key must be readable by the run user.
-lsiown -R "${RUN_USER}:${RUN_GROUP}" /config /data
-chown "${RUN_USER}:${RUN_GROUP}" /app/oauth-private.key
+lsiown -R "${RUN_USER}:${RUN_GROUP}" \
+    /app \
+    /config \
+    /data
 
 echo "**** Janus init complete ****"
