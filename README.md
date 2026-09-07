@@ -33,9 +33,10 @@ Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Se
 4. **自定义脚本（Custom Scripts）** — 挂载目录到 `/custom-cont-init.d`，放入可执行脚本即可在每次启动时、所有服务启动前执行。
 5. **自定义服务（Custom Services）** — 挂载目录到 `/custom-services.d`，放入可执行脚本即可作为独立服务并行运行。
 6. **Docker Mods 扩展生态** — 通过 `DOCKER_MODS` 环境变量引用 LinuxServer 社区扩展层。
-7. **标准化的 `/config`** — 配置与密钥分离：
-   * `/config/.env` — Janus 运行配置（软链到 `/app/.env`）。
-   * `/config/oauth-private.key` — 从 Blessing Skin Server 复制的令牌签名密钥。
+7. **标准化的配置 / 数据目录**：
+   * `/config/.env` — Janus 运行配置（软链到 `/app/.env`），由容器从 `/app/.env.example` 复制并叠加 compose 环境变量生成。
+   * `/server-storage/oauth-private.key` — 只读挂载 Blessing Skin Server 的 storage 目录后自动读取的令牌签名密钥。
+   * `/data` — 迁移前自动生成的数据库备份目录（`backup-*.sql`）。
 
 ## ⚠️ 关于 HTTPS / 反向代理
 
@@ -46,15 +47,16 @@ Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Se
 ### 前置准备
 
 1. 确认你的 Blessing Skin Server 已安装并配置好 Yggdrasil Connect 插件。
-2. 从你的 Blessing Skin Server 复制签名密钥到本项目的 `./config` 目录：
+2. **挂载 Blessing Skin 的 storage 目录**：容器启动时会自动从只读挂载点 `/server-storage/oauth-private.key` 读取令牌签名密钥（无需手动复制）。将你 Blessing Skin 的 `./data`（即其 `storage` 内容）目录挂载到 Janus 的 `/server-storage:ro` 即可。
 
    ```bash
-   mkdir -p config
-   cp /path/to/blessing-skin/storage/oauth-private.key config/oauth-private.key
+   # 在 docker-compose.yml 的 janus 服务中：
+   volumes:
+     - ./data:/server-storage:ro     # ./data 是 Blessing Skin 的 storage 目录
    ```
 
    > 如果该密钥是 PKCS#1 格式（以 `-----BEGIN RSA PRIVATE KEY-----` 开头），容器启动时会自动转换为 PKCS#8。
-   > 请**确保密钥是 PKCS#8** 格式（以 `-----BEGIN PRIVATE KEY-----` 开头），否则 Janus 无法启动。若不是，可先用 OpenSSL 转换：
+   > 请**确保密钥是 PKCS#8** 格式（以 `-----BEGIN PRIVATE KEY-----` 开头），否则 Janus 无法启动。若你的 Blessing Skin 密钥不符合，可先用 OpenSSL 转换：
    >
    > ```bash
    > openssl pkcs8 -topk8 -inform PEM -outform PEM -in oauth-private.key -out oauth-private-pkcs8.key -nocrypt
@@ -82,18 +84,19 @@ services:
       - BS_SITE_URL=https://skin.example.com   # 皮肤站地址（HTTPS）
       - SHARED_CLIENT_ID=
       # - DB_PREFIX=bs_                        # 若皮肤站配置了表前缀则打开
-      - TOKEN_EXPIRES_IN_1=259200
-      - TOKEN_EXPIRES_IN_2=604800
-      - DEVICE_CODE_EXPIRES_IN=600
-      - GRANT_EXPIRES_IN=25920000
     ports:
       - "3000:3000"
     volumes:
-      - ./config:/config       # .env 及 oauth-private.key
+      - ./janus-config:/config      # .env（由模板 + 环境变量生成）
+      - ./data:/server-storage:ro   # 只读读取 Blessing Skin 的 oauth-private.key
+      - ./janus-data:/data          # 迁移前数据库自动备份
     restart: unless-stopped
 ```
 
 > **重要**：`ISSUER` 与 `BS_SITE_URL` 必须是 `https://` 或 `http://localhost`，**不得以 `/` 结尾**，不得包含 query string 或 fragment，否则 Janus 会因配置校验失败而退出。
+>
+> **`.env` 的生成规则**：容器启动时若 `/config/.env` 不存在，会从镜像内的 `/app/.env.example` 复制一份；随后用 docker-compose 中设置的环境变量（`DB_*`、`ISSUER`、`BS_SITE_URL`、`TOKEN_*` 等）覆盖 `/config/.env` 中对应项。优先级为：
+> **docker-compose 环境变量 > 已存在的 `/config/.env` > `.env.example` 默认值**。
 
 ### 手动运行
 
@@ -106,7 +109,9 @@ docker run -d \
   -e DB_USERNAME=blessingskin -e DB_PASSWORD=change-me-db-password -e DB_NAME=blessingskin \
   -e ISSUER=https://auth.example.com \
   -e BS_SITE_URL=https://skin.example.com \
-  -v ./config:/config \
+  -v ./janus-config:/config \
+  -v ./data:/server-storage:ro \
+  -v ./janus-data:/data \
   ghcr.io/snowmoonss/janus:latest
 ```
 
@@ -134,9 +139,8 @@ docker run -d \
 | `TOKEN_EXPIRES_IN_2` | Refresh Token 过期时间（秒） | `604800` |
 | `DEVICE_CODE_EXPIRES_IN` | 设备代码过期时间（秒） | `600` |
 | `GRANT_EXPIRES_IN` | 单次授权过期时间（秒） | `25920000` |
-| `JANUS_ENV` | 直接提供完整 `.env` 内容（多行），覆盖默认生成 | 未设置 |
 
-> 数据库相关变量会在容器启动时写入 `/config/.env`；`JANUS_ENV` 会整体写入 `.env`（适用于需要自定义更多配置项的进阶场景）。
+> 数据库相关变量（`DB_*`）、`ISSUER`、`BS_SITE_URL`、`TOKEN_*` 等会在容器启动时写入 `/config/.env`（由 `.env.example` 复制，并在这些环境变量非空时覆盖对应项）。
 
 ## 开发与构建
 
