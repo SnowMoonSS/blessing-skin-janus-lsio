@@ -52,16 +52,17 @@ Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还
 2. **安装插件**：在插件市场安装 Yggdrasil Connect 插件。
 3. **创建个人访问客户端**：在 Blessing Skin Server 的容器内执行：
    ```bash
-   docker exec -it blessing-skin-server php artisan yggc:create-personal-access-client
+   docker exec -it -w /app blessing-skin-server php artisan yggc:create-personal-access-client
    ```
-   创建完成后，在 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
+   创建完成后，在 Blessing Skin Server 的 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
+   > Yggdrasil Connect 不会自动写入 OAuth2 的回调 URL，所以这里直接选择 `yes` 。之后去`用户中心/高级功能/OAuth2 应用`自行设置回调 URL。
 4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin Server 的容器内执行
    ```bash
-   docker exec -it blessing-skin-server php artisan yggc:fix-uuid-table
+   docker exec -it -w /app blessing-skin-server php artisan yggc:fix-uuid-table
    ```
    以清除原版插件 `uuid` 表中可能存在的异常数据并修改表结构。
    > ⚠️ **该命令会直接删除 `uuid` 表中的部分记录，执行前请务必先备份 `uuid` 表！** 若你未安装过原版 Yggdrasil API 而直接安装本插件，则无需执行此命令。
-5. **填写 Janus 服务端标识符**：部署好 Janus 后，在本插件的配置页面填写你的 Janus 实例的 OpenID 提供者标识符（即本文档中的 `ISSUER`）。
+5. **填写 OpenID 提供者标识符**：部署好 Janus 后，在本插件的配置页面填写你的 Janus 实例的 OpenID 提供者标识符（即本文档中的 `ISSUER`）。
 
 > **已知问题**：在部分情况下，用户通过传统 Auth Server 登录可能遇到 HTTP 500，或请求 OAuth 授权时在 scope 正确的情况下仍遇到 `invalid_scopes` 错误。可在插件管理中重启（禁用再启用）该插件，或将 Blessing Skin Server 升级至最新开发版以解决。详见 [bs-community/blessing-skin-server#661](https://github.com/bs-community/blessing-skin-server/pull/661#issuecomment-3008486580)。
 
