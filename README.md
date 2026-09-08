@@ -38,7 +38,7 @@ Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Se
    * `/server-storage/oauth-private.key` — 只读挂载 Blessing Skin Server 的 storage 目录后自动读取的令牌签名密钥。
    * `/data` — 迁移前自动生成的数据库备份目录（`backup-*.sql`）。
 
-## ⚠️ 关于 HTTPS / 反向代理
+## 关于 HTTPS / 反向代理
 
 **本镜像不做任何 HTTPS / 反向代理功能。** 出于安全与兼容性考虑（`ISSUER` 与 `BS_SITE_URL` 必须是 `https://` 地址，`trust proxy` 已启用），你需要自行在 Janus 之前部署一个反向代理（如 Nginx / HAProxy / Cloudflared）并在其上配置 HTTPS 证书，将请求转发到本容器（默认 `3000` 端口）。镜像内不含、也不默认启用任何代理组件。
 
@@ -46,6 +46,7 @@ Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Se
 
 Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还需要在 Blessing Skin Server 中配置 [Yggdrasil Connect 插件](https://github.com/MUAlliance/yggdrasil-connect)。请按以下步骤操作（摘自该插件 README）：
 
+> [!NOTE]
 > 说明：第 3、4 步是 Blessing Skin Server（Laravel）的 artisan 命令，需要在 **Blessing Skin 容器** 内执行（容器名 `blessing-skin`）；Janus 容器本身不含 PHP/artisan。
 
 1. **禁用旧版插件**：如果你已安装基于原版 Yggdrasil API 插件修改的旧版插件，请务必在下载新版插件前禁用旧版插件，否则可能出现 `Invalid version string` 错误。
@@ -55,15 +56,18 @@ Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还
    docker exec -it -w /app blessing-skin-server php artisan yggc:create-personal-access-client
    ```
    创建完成后，在 Blessing Skin Server 的 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
+   > [!NOTE]
    > Yggdrasil Connect 不会自动写入 OAuth2 的回调 URL，所以这里直接选择 `yes` 。之后去`用户中心/高级功能/OAuth2 应用`自行设置回调 URL。示例：`https://auth.example.com/callback`
 4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin Server 的容器内执行
    ```bash
    docker exec -it -w /app blessing-skin-server php artisan yggc:fix-uuid-table
    ```
    以清除原版插件 `uuid` 表中可能存在的异常数据并修改表结构。
-   > ⚠️ **该命令会直接删除 `uuid` 表中的部分记录，执行前请务必先备份 `uuid` 表！** 若你未安装过原版 Yggdrasil API 而直接安装本插件，则无需执行此命令。
+   > [!CAUTION]
+   > **该命令会直接删除 `uuid` 表中的部分记录，执行前请务必先备份 `uuid` 表！** 若你未安装过原版 Yggdrasil API 而直接安装本插件，则无需执行此命令。
 5. **填写 OpenID 提供者标识符**：部署好 Janus 后，在本插件的配置页面填写你的 Janus 实例的 OpenID 提供者标识符（即本文档中的 `ISSUER`）。
 
+> [!NOTE]
 > **已知问题**：在部分情况下，用户通过传统 Auth Server 登录可能遇到 HTTP 500，或请求 OAuth 授权时在 scope 正确的情况下仍遇到 `invalid_scopes` 错误。可在插件管理中重启（禁用再启用）该插件，或将 Blessing Skin Server 升级至最新开发版以解决。详见 [bs-community/blessing-skin-server#661](https://github.com/bs-community/blessing-skin-server/pull/661#issuecomment-3008486580)。
 
 ## 快速开始
@@ -117,6 +121,7 @@ services:
     restart: unless-stopped
 ```
 
+> [!IMPORTANT]
 > **重要**：`ISSUER` 与 `BS_SITE_URL` 必须是 `https://` 或 `http://localhost`，**不得以 `/` 结尾**，不得包含 query string 或 fragment，否则 Janus 会因配置校验失败而退出。
 >
 > **`.env` 的生成规则**：容器启动时若 `/config/.env` 不存在，会从镜像内的 `/app/.env.example` 复制一份；随后用 docker-compose 中设置的环境变量（`DB_*`、`ISSUER`、`BS_SITE_URL`、`TOKEN_*` 等）覆盖 `/config/.env` 中对应项。优先级为：
@@ -164,6 +169,7 @@ docker run -d \
 | `DEVICE_CODE_EXPIRES_IN` | 设备代码过期时间（秒） | `600` |
 | `GRANT_EXPIRES_IN` | 单次授权过期时间（秒） | `25920000` |
 
+> [!NOTE]
 > 数据库相关变量（`DB_*`）、`ISSUER`、`BS_SITE_URL`、`TOKEN_*` 等会在容器启动时写入 `/config/.env`（由 `.env.example` 复制，并在这些环境变量非空时覆盖对应项）。
 
 ## 开发与构建
