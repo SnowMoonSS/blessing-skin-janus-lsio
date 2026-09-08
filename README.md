@@ -1,6 +1,6 @@
 # Janus - LinuxServer.io Image
 
-基于 [LinuxServer.io](https://linuxserver.io/) 基础镜像构建的 [Janus](https://github.com/bs-community/janus) Docker 镜像——Blessing Skin Server 的外挂 [Yggdrasil Connect](https://github.com/yushijinhun/authlib-injector/issues/268) 服务端。
+基于 [LinuxServer.io](https://linuxserver.io/) 基础镜像构建的 [Janus](https://github.com/bs-community/janus) Docker 镜像——Blessing Skin Server 的外挂 [Yggdrasil Connect](https://github.com/MUAlliance/yggdrasil-connect) 服务端。
 
 Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Server](https://github.com/bs-community/blessing-skin-server) 使用**同一个 MySQL/MariaDB 数据库**，为皮肤站提供基于 OAuth 2.0 / OpenID Connect 的外置登录（Yggdrasil Connect）能力。
 
@@ -41,6 +41,29 @@ Janus 是一个独立的 Node.js（NestJS）服务，需要与 [Blessing Skin Se
 ## ⚠️ 关于 HTTPS / 反向代理
 
 **本镜像不做任何 HTTPS / 反向代理功能。** 出于安全与兼容性考虑（`ISSUER` 与 `BS_SITE_URL` 必须是 `https://` 地址，`trust proxy` 已启用），你需要自行在 Janus 之前部署一个反向代理（如 Nginx / HAProxy / Cloudflared）并在其上配置 HTTPS 证书，将请求转发到本容器（默认 `3000` 端口）。镜像内不含、也不默认启用任何代理组件。
+
+## 启用 Yggdrasil Connect
+
+Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还需要在 Blessing Skin Server 中配置 [Yggdrasil Connect 插件](https://github.com/MUAlliance/yggdrasil-connect)。请按以下步骤操作（摘自该插件 README）：
+
+> 说明：第 3、4 步是 Blessing Skin Server（Laravel）的 artisan 命令，需要在 **Blessing Skin 容器** 内执行（容器名 `blessing-skin`）；Janus 容器本身不含 PHP/artisan。
+
+1. **禁用旧版插件**：如果你已安装基于原版 Yggdrasil API 插件修改的旧版插件，请务必在下载新版插件前禁用旧版插件，否则可能出现 `Invalid version string` 错误。
+2. **安装插件**：在插件市场安装 Yggdrasil Connect 插件。
+3. **创建个人访问客户端**：在 Blessing Skin 容器内执行：
+   ```bash
+   docker exec -it blessing-skin-server php artisan yggc:create-personal-access-client
+   ```
+   创建完成后，在 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
+4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin 容器内执行
+   ```bash
+   docker exec -it blessing-skin-server php artisan yggc:fix-uuid-table
+   ```
+   以清除原版插件 `uuid` 表中可能存在的异常数据并修改表结构。
+   > ⚠️ **该命令会直接删除 `uuid` 表中的部分记录，执行前请务必先备份 `uuid` 表！** 若你未安装过原版 Yggdrasil API 而直接安装本插件，则无需执行此命令。
+5. **填写 Janus 服务端标识符**：部署好 Janus 后，在本插件的配置页面填写你的 Janus 实例的 OpenID 提供者标识符（即本文档中的 `ISSUER`）。
+
+> **已知问题**：在部分情况下，用户通过传统 Auth Server 登录可能遇到 HTTP 500，或请求 OAuth 授权时在 scope 正确的情况下仍遇到 `invalid_scopes` 错误。可在插件管理中重启（禁用再启用）该插件，或将 Blessing Skin Server 升级至最新开发版以解决。详见 [bs-community/blessing-skin-server#661](https://github.com/bs-community/blessing-skin-server/pull/661#issuecomment-3008486580)。
 
 ## 快速开始
 
