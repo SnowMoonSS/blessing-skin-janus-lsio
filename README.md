@@ -55,7 +55,7 @@ Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还
    docker exec -it -w /app blessing-skin-server php artisan yggc:create-personal-access-client
    ```
    创建完成后，在 Blessing Skin Server 的 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
-   > Yggdrasil Connect 不会自动写入 OAuth2 的回调 URL，所以这里直接选择 `yes` 。之后去`用户中心/高级功能/OAuth2 应用`自行设置回调 URL。
+   > Yggdrasil Connect 不会自动写入 OAuth2 的回调 URL，所以这里直接选择 `yes` 。之后去`用户中心/高级功能/OAuth2 应用`自行设置回调 URL。示例：`https://auth.example.com/callback`
 4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin Server 的容器内执行
    ```bash
    docker exec -it -w /app blessing-skin-server php artisan yggc:fix-uuid-table
