@@ -50,12 +50,12 @@ Janus 本身只提供 OpenID 服务端；要真正启用 Yggdrasil Connect，还
 
 1. **禁用旧版插件**：如果你已安装基于原版 Yggdrasil API 插件修改的旧版插件，请务必在下载新版插件前禁用旧版插件，否则可能出现 `Invalid version string` 错误。
 2. **安装插件**：在插件市场安装 Yggdrasil Connect 插件。
-3. **创建个人访问客户端**：在 Blessing Skin 容器内执行：
+3. **创建个人访问客户端**：在 Blessing Skin Server 的容器内执行：
    ```bash
    docker exec -it blessing-skin-server php artisan yggc:create-personal-access-client
    ```
    创建完成后，在 `.env` 中新增 `PASSPORT_PERSONAL_ACCESS_CLIENT_ID`，将其值设为命令返回的个人访问客户端的 Client ID。
-4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin 容器内执行
+4. **（仅当从原版 Yggdrasil API 迁移时）修复 uuid 表**：在 Blessing Skin Server 的容器内执行
    ```bash
    docker exec -it blessing-skin-server php artisan yggc:fix-uuid-table
    ```
